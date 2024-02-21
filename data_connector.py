@@ -170,17 +170,3 @@ if __name__ == "__main__":
 
     Converter = DataConverter(base_data_path)
     Converter.write_all_prostate_volumes(base_data_path / "SortedProstateData")
-    # test_seg = Converter['ProstateX-0004'].get_segmentation_volume()
-    # print(test_seg)
-    # test_vol = Converter['ProstateX-0004'].get_prostate_volume()
-    # print(test_vol)
-    # assert check_images_in_same_space(test_seg, test_vol)
-    #
-    #
-    # test_vol = check_and_adjust_image_to_same_space(test_seg, test_vol)
-
-    # prostate_data_instance = DataConverter(base_data_path)
-
-
-# Now you can access the loaded DICOM files using prostate_data_instance.prostate_dcms
-# and prostate_data_instance.segmentation_dcm
