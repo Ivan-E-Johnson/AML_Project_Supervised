@@ -3,9 +3,11 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pydicom
 import itk
 from dcm_classifier.dicom_volume import DicomSingleVolumeInfoBase
+from dcm_classifier.namic_dicom_typing import itk_read_from_dicomfn_list
 
 
 class DataConverter:
@@ -50,6 +52,17 @@ class DataConverter:
         self.segmentation_data_path = base_data_path / "Segmentations/PROSTATEx"
         self.data_dict = {}  # todo: change to defaultdict
         self._init_data_dict()
+        self.data_df = pd.DataFrame(
+            columns=[
+                "PatientID",
+                "Size",
+                "Spacing",
+                "Origin",
+                "Direction",
+                "UniqueValues",
+                "Stats",
+            ]
+        )
 
     def __getitem__(self, patient_id):
         """
@@ -88,7 +101,7 @@ class DataConverter:
             a list of paths to the segmentation dicom files
         prostate_volume : itk.Image
             an itk.Image object that represents the prostate volume
-        segmentation_volume : itk.Image
+        orig_segmentation_volume : itk.Image
             an itk.Image object that represents the segmentation volume
 
         Methods
@@ -116,18 +129,55 @@ class DataConverter:
                 segmentation : list
                     a list of paths to the segmentation dicom files
             """
-            self.prostate_dcms = prostate_dcms
-            self.segmentation_dcm = segmentation
+            self.prostate_dcms = list(prostate_dcms)
+            self.segmentation_dcm = list(segmentation)
 
-            self._prostate_volume_info_base = DicomSingleVolumeInfoBase(prostate_dcms)
-            self._segmentation_volume_info_base = DicomSingleVolumeInfoBase(
-                segmentation
+            self.segmentation_volume = None
+            self.prostate_volume = itk_read_from_dicomfn_list(self.prostate_dcms)
+            self.orig_segmentation_volume = itk_read_from_dicomfn_list(
+                self.segmentation_dcm
             )
+            self.segmentation_list = []
+            self._split_segmentation()
+            self._squash_segmentations_with_one_hot()
 
-            self.prostate_volume = self._prostate_volume_info_base.get_itk_image()
-            self.segmentation_volume = (
-                self._segmentation_volume_info_base.get_itk_image()
+        def _squash_segmentations_with_one_hot(self):
+            """
+            Squashes the 4 segmentations into a single one-hot encoded segmentation.
+            """
+            # squash the segmentations into a single one-hot encoded segmentation
+            # The four-class segmentation encompasses the PZ, TZ, AFMS (anterior fibromuscular stroma), and the urethra
+            # 0: background, 1: peripheral zone, 2: transition zone, 3: urethra , 4 AFMS
+            # The original segmentation has a Z dimension that is 4 times the prostate volume
+            squashed_seg_arr = np.zeros_like(
+                itk.GetArrayFromImage(self.prostate_volume)
             )
+            for i in range(4):
+                seg_array = itk.GetArrayFromImage(self.segmentation_list[i])
+                squashed_seg_arr += (i + 1) * seg_array / 255
+            squashed_seg = itk.GetImageFromArray(squashed_seg_arr)
+            squashed_seg.SetSpacing(self.prostate_volume.GetSpacing())
+            squashed_seg.SetDirection(self.prostate_volume.GetDirection())
+            squashed_seg.SetOrigin(self.prostate_volume.GetOrigin())
+            self.segmentation_volume = squashed_seg
+
+        def _split_segmentation(self):
+            """
+            Splits the segmentation volume into its 4 components.
+            From manual inspection the segmentation has a Z dimension that is 4 times the prostate volume.
+
+            """
+            desired_shape = self.prostate_volume.GetLargestPossibleRegion().GetSize()
+            segmentation_array = itk.GetArrayFromImage(self.orig_segmentation_volume)
+            for i in range(4):
+                seg_array = segmentation_array[
+                    i * desired_shape[2] : (i + 1) * desired_shape[2], :, :
+                ]
+                seg_image = itk.GetImageFromArray(seg_array)
+                seg_image.SetSpacing(self.prostate_volume.GetSpacing())
+                seg_image.SetDirection(self.prostate_volume.GetDirection())
+                seg_image.SetOrigin(self.prostate_volume.GetOrigin())
+                self.segmentation_list.append(seg_image)
 
         def _ensure_all_data_in_same_space(self):
             """
@@ -169,7 +219,11 @@ class DataConverter:
                 output_path : Path
                     a Path object that represents the path where the segmentation volume will be written
             """
-            itk.imwrite(self.get_segmentation_volume(), output_path)
+            itk.imwrite(self.segmentation_volume, output_path)
+            # for i in range(len(self.segmentation_list)):
+            #     itk.imwrite(self.segmentation_list[i], output_path.parent / f"{output_path.stem}_{i}.nii.gz")
+
+        # TODO Add functionality to write out a "rough" segmentation of the prostate which is just all the masks combined
 
     def _init_data_dict(self):
         """
@@ -203,6 +257,8 @@ class DataConverter:
         """
         for patient_id in self.data_dict.keys():
             patient_data = self.data_dict[patient_id]
+
+            # self.data_df = pd.concat([self.data_df, pd.DataFrame(get_exploratory_image_info(patient_data.get_prostate_volume()))], ignore_index=True)
             output_dir = output_base_dir / patient_id
             print(f"Writing to {output_dir}")
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -215,6 +271,7 @@ class DataConverter:
                 )
             except Exception as e:
                 print(f"Error writing {patient_id}: {e}")
+        # self.data_df.to_csv(output_base_dir / "data_collection.csv", index=False)
 
 
 def get_image_stats(image: itk.Image):
@@ -324,11 +381,47 @@ def check_and_adjust_image_to_same_space(
     return target_image
 
 
+def get_exploratory_image_info(image: itk.Image):
+    """
+    Returns the exploratory information of the given image.
+
+    Parameters
+    ----------
+        image : itk.Image
+            an itk.Image object
+
+    Returns
+    -------
+        dict
+            a dictionary containing the exploratory information of the image
+    """
+    exploratory_info = {}
+    exploratory_info["Size"] = image.GetLargestPossibleRegion().GetSize()
+    exploratory_info["Spacing"] = image.GetSpacing()
+    exploratory_info["Origin"] = image.GetOrigin()
+    exploratory_info["Direction"] = image.GetDirection()
+    exploratory_info["UniqueValues"] = np.unique(itk.GetArrayFromImage(image))
+    exploratory_info["Stats"] = get_image_stats(image)
+    print(exploratory_info)
+    return exploratory_info
+
+
 if __name__ == "__main__":
     base_data_path = Path(
         "/Users/iejohnson/School/spring_2024/AML/Supervised_learning/Data"
     )
     output_base_dir = base_data_path / "SortedProstateData"
 
+    # test_segmentation_dcms = list(
+    #     (base_data_path / "Segmentations/PROSTATEx/ProstateX-0004/").rglob("*.dcm")
+    # )
+    # test_prostate_dcms = list(
+    #     (base_data_path / "OrigProstate/PROSTATEx/ProstateX-0004/").rglob("*.dcm")
+    # )
+    # test_data = DataConverter.SinglePatientData(test_prostate_dcms, test_segmentation_dcms)
+    # test_prostate = test_data.get_prostate_volume()
+    # test_segmentation = test_data.get_segmentation_volume()
+    # print(f"Prostate volume: {test_data.get_prostate_volume()}")
+    # print(f"Segmentation volume: {test_data.get_segmentation_volume()}")
     Converter = DataConverter(base_data_path)
     Converter.write_all_prostate_volumes(base_data_path / "SortedProstateData")
