@@ -9,24 +9,113 @@ from dcm_classifier.dicom_volume import DicomSingleVolumeInfoBase
 
 
 class DataConverter:
+    """
+    A class used to convert and manage prostate data.
+
+    ...
+
+    Attributes
+    ----------
+    input_prostate_data_path : Path
+        a Path object that represents the directory where the original prostate data is stored
+    segmentation_data_path : Path
+        a Path object that represents the directory where the segmentation data is stored
+    data_dict : dict
+        a dictionary that stores the patient data with patient_id as key
+
+    Methods
+    -------
+    __getitem__(patient_id):
+        Returns the patient data for the given patient_id.
+    __iter__():
+        Returns an iterator for the data dictionary.
+    __len__():
+        Returns the number of patients in the data dictionary.
+    _init_data_dict():
+        Initializes the data dictionary with patient data.
+    write_all_prostate_volumes(output_base_dir):
+        Writes all prostate volumes to the specified directory.
+    """
+
     def __init__(self, base_data_path):
-        # NOTE
+        """
+        Constructs all the necessary attributes for the DataConverter object.
+
+        Parameters
+        ----------
+            base_data_path : Path
+                a Path object that represents the base directory where the data is stored
+        """
         self.input_prostate_data_path = base_data_path / "OrigProstate/PROSTATEx"
         self.segmentation_data_path = base_data_path / "Segmentations/PROSTATEx"
         self.data_dict = {}  # todo: change to defaultdict
         self._init_data_dict()
 
     def __getitem__(self, patient_id):
+        """
+        Returns the patient data for the given patient_id.
+
+        Parameters
+        ----------
+            patient_id : str
+                the id of the patient
+        """
         return self.data_dict[patient_id]
 
     def __iter__(self):
+        """
+        Returns an iterator for the data dictionary.
+        """
         return iter(self.data_dict)
 
     def __len__(self):
+        """
+        Returns the number of patients in the data dictionary.
+        """
         return len(self.data_dict)
 
     class SinglePatientData:
+        """
+        A class used to manage single patient data.
+
+        ...
+
+        Attributes
+        ----------
+        prostate_dcms : list
+            a list of paths to the prostate dicom files
+        segmentation_dcm : list
+            a list of paths to the segmentation dicom files
+        prostate_volume : itk.Image
+            an itk.Image object that represents the prostate volume
+        segmentation_volume : itk.Image
+            an itk.Image object that represents the segmentation volume
+
+        Methods
+        -------
+        _ensure_all_data_in_same_space():
+            Ensures that the prostate volume and segmentation volume are in the same space.
+        get_prostate_volume():
+            Returns the prostate volume.
+        get_segmentation_volume():
+            Returns the segmentation volume.
+        write_prostate_volume(output_path):
+            Writes the prostate volume to the specified path.
+        write_segmentation_volume(output_path):
+            Writes the segmentation volume to the specified path.
+        """
+
         def __init__(self, prostate_dcms, segmentation):
+            """
+            Constructs all the necessary attributes for the SinglePatientData object.
+
+            Parameters
+            ----------
+                prostate_dcms : list
+                    a list of paths to the prostate dicom files
+                segmentation : list
+                    a list of paths to the segmentation dicom files
+            """
             self.prostate_dcms = prostate_dcms
             self.segmentation_dcm = segmentation
 
@@ -41,23 +130,51 @@ class DataConverter:
             )
 
         def _ensure_all_data_in_same_space(self):
+            """
+            Ensures that the prostate volume and segmentation volume are in the same space.
+            """
             self.segmentation_volume = check_and_adjust_image_to_same_space(
                 self.prostate_volume, self.segmentation_volume
             )
 
         def get_prostate_volume(self):
+            """
+            Returns the prostate volume.
+            """
             return self.prostate_volume
 
         def get_segmentation_volume(self):
+            """
+            Returns the segmentation volume.
+            """
             return self.segmentation_volume
 
         def write_prostate_volume(self, output_path):
+            """
+            Writes the prostate volume to the specified path.
+
+            Parameters
+            ----------
+                output_path : Path
+                    a Path object that represents the path where the prostate volume will be written
+            """
             itk.imwrite(self.get_prostate_volume(), output_path)
 
         def write_segmentation_volume(self, output_path):
+            """
+            Writes the segmentation volume to the specified path.
+
+            Parameters
+            ----------
+                output_path : Path
+                    a Path object that represents the path where the segmentation volume will be written
+            """
             itk.imwrite(self.get_segmentation_volume(), output_path)
 
     def _init_data_dict(self):
+        """
+        Initializes the data dictionary with patient data.
+        """
         prostate_dirs = [
             x for x in self.input_prostate_data_path.iterdir() if x.is_dir()
         ]
@@ -76,10 +193,16 @@ class DataConverter:
             self.data_dict[patient_id] = patient_data
 
     def write_all_prostate_volumes(self, output_base_dir):
+        """
+        Writes all prostate volumes to the specified directory.
+
+        Parameters
+        ----------
+            output_base_dir : Path
+                a Path object that represents the directory where the prostate volumes will be written
+        """
         for patient_id in self.data_dict.keys():
             patient_data = self.data_dict[patient_id]
-            assert isinstance(patient_data, self.SinglePatientData)
-            print(f"Converting {patient_id}...")
             output_dir = output_base_dir / patient_id
             print(f"Writing to {output_dir}")
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -95,6 +218,25 @@ class DataConverter:
 
 
 def get_image_stats(image: itk.Image):
+    """
+    Returns the statistics of the given image.
+
+    Parameters
+    ----------
+        image : itk.Image
+            an itk.Image object
+
+    Returns
+    -------
+        mean : float
+            the mean intensity of the image
+        std : float
+            the standard deviation of the image intensities
+        max : float
+            the maximum intensity of the image
+        min : float
+            the minimum intensity of the image
+    """
     stats = itk.StatisticsImageFilter.New(image)
     stats.SetInput(image)
     stats.Update()
@@ -108,6 +250,23 @@ def get_image_stats(image: itk.Image):
 def check_images_in_same_space(
     image1: itk.Image, image2: itk.Image, tolerance: float = 1e-5
 ) -> bool:
+    """
+    Checks if two images are in the same space.
+
+    Parameters
+    ----------
+        image1 : itk.Image
+            the first image
+        image2 : itk.Image
+            the second image
+        tolerance : float, optional
+            the tolerance for the comparison (default is 1e-5)
+
+    Returns
+    -------
+        bool
+            True if the images are in the same space, False otherwise
+    """
     msg: str = ""
     is_in_same_space: bool = True
 
@@ -137,10 +296,22 @@ def check_and_adjust_image_to_same_space(
     reference_image: itk.Image, target_image: itk.Image, tolerance: float = 1e-5
 ) -> itk.Image:
     """
-    Adjusts target_image's metadata to match reference_image's.
-    """
+    Adjusts the target image's metadata to match the reference image's.
 
-    # Check if images are already in the same space, if not, adjust target_image
+    Parameters
+    ----------
+        reference_image : itk.Image
+            the reference image
+        target_image : itk.Image
+            the target image that will be adjusted
+        tolerance : float, optional
+            the tolerance for the comparison (default is 1e-5)
+
+    Returns
+    -------
+        itk.Image
+            the adjusted target image
+    """
     if not check_images_in_same_space(reference_image, target_image, tolerance):
         # Adjust dimension indirectly by ensuring we are using the same type
         # Note: ITK's Python wrapping does not allow changing the dimensionality of an existing image directly
@@ -150,23 +321,14 @@ def check_and_adjust_image_to_same_space(
         target_image.SetDirection(reference_image.GetDirection())
         target_image.SetOrigin(reference_image.GetOrigin())
 
-        print("Target image adjusted to match the reference image's space.")
-    else:
-        print("Images are already in the same space. No adjustments needed.")
-
     return target_image
 
 
-# Example usage:
 if __name__ == "__main__":
     base_data_path = Path(
         "/Users/iejohnson/School/spring_2024/AML/Supervised_learning/Data"
     )
     output_base_dir = base_data_path / "SortedProstateData"
-    test_dicom_path = (
-        base_data_path
-        / "OrigProstate/PROSTATEx/ProstateX-0004/10-18-2011-NA-MR prostaat kanker detectie WDSmc MCAPRODETW-45493/5.000000-t2tsetra-75680"
-    )
 
     Converter = DataConverter(base_data_path)
     Converter.write_all_prostate_volumes(base_data_path / "SortedProstateData")
