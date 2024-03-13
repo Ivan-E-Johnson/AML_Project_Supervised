@@ -51,3 +51,4 @@ virtualenv==20.25.0
 jupyterlab
 notebook
 python-dotenv
+pytorch-ignite==0.4.13
