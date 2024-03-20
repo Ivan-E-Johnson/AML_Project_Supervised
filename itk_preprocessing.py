@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 
 from data_connector import get_exploratory_image_info, get_image_stats
 import pandas as pd
+import itertools
 
 
 def show_subject_images(image: itk.Image, mask: itk.Image):
@@ -235,70 +236,73 @@ def find_closest_center(true_center: tuple[int, int, int], center_dict: dict):
     return closest_center
 
 
-if __name__ == "__main__":
+def main():
     base_data_path = Path(
         "/home/iejohnson/programing/Supervised_learning/DATA/SortedProstateData"
     )
-    output_data_path = Path(
-        "/home/iejohnson/programing/Supervised_learning/DATA/Check_Centers"
-    )
+    output_data_path = Path("heck_Centers")
     output_data_path.mkdir(exist_ok=True, parents=True)
+
     thresholding_list = [1, 3, 5]
     histogram_list = [10, 30, 75]
-    images_dict = {}
-    center_dict = {}
+    image_types = ["raw_image", "simple_otsu"] + [
+        f"{t}_{h}"
+        for t, h in itertools.product(thresholding_list, histogram_list)
+        if t < h
+    ]
+
+    # Initialize dictionaries to store total distances and counts for each image type
+    total_distances = {image_type: 0.0 for image_type in image_types}
+    counts = {image_type: 0 for image_type in image_types}
 
     image_paths, mask_paths = init_data_lists(base_data_path)
-    selected_indices = random.sample(range(len(image_paths)), 10)
-    selected_image_paths = [image_paths[i] for i in selected_indices]
-    selected_mask_paths = [mask_paths[i] for i in selected_indices]
-
-    best_image_dict = {}
-    best_center_dict = {}
+    # selected_indices = random.sample(range(len(image_paths)), 10)
+    # selected_image_paths = [image_paths[i] for i in selected_indices]
+    # selected_mask_paths = [mask_paths[i] for i in selected_indices]
+    selected_image_paths = image_paths
+    selected_mask_paths = mask_paths
     for image_path, mask_path in zip(selected_image_paths, selected_mask_paths):
-        images_dict = {}
-        center_dict = {}
-        print(image_path, mask_path)
+        print(f"Processing {image_path} and {mask_path}")
         image = itk.imread(str(image_path), itk.F)
         mask = itk.imread(str(mask_path), itk.UC)
-        simple_otsu_image = simple_otsu_thresholding(image)
-        images_dict["simple_otsu"] = simple_otsu_image
-        simple_otsu_center = find_center_of_gravity(simple_otsu_image)
-        center_dict["simple_otsu"] = simple_otsu_center
 
-        images_dict["raw_image"] = image
+        # Raw image
         raw_image_center = find_center_of_gravity(image)
-        center_dict["raw_image"] = raw_image_center
+        mask_center = find_center_of_gravity(mask)
+        raw_distance = calculate_distance_between_points(raw_image_center, mask_center)
+        total_distances["raw_image"] += raw_distance
+        counts["raw_image"] += 1
 
-        for threshold in thresholding_list:
-            for histogram in histogram_list:
-                if threshold >= histogram:
-                    continue
-                print(f"Threshold: {threshold}, Histogram: {histogram}")
-                threshed_image = multi_otsu_thresholding(image, threshold, histogram)
-                images_dict[f"{threshold}_{histogram}"] = threshed_image
-                center_dict[f"{threshold}_{histogram}"] = find_center_of_gravity(
-                    threshed_image
-                )
-        print(f"Finished otsu thresholding for {image_path.name}")
-        # Convert the multiclass mask to a binary mask
-        binary_mask = convert_multiclass_mask_to_binary(mask)
-        mask_center = find_center_of_gravity(binary_mask)
-        print(f"Mask Center: {mask_center}")
-        # plot_dict_images(images_dict, center_dict, mask_center)
-        print(f"Attempting to find closest center to {mask_center}")
-        closest_center = find_closest_center(mask_center, center_dict)
-        print(f"Closest Center: {closest_center}")
+        # Simple Otsu thresholding
+        simple_otsu_image = simple_otsu_thresholding(image)
+        simple_otsu_center = find_center_of_gravity(simple_otsu_image)
+        simple_otsu_distance = calculate_distance_between_points(
+            simple_otsu_center, mask_center
+        )
+        total_distances["simple_otsu"] += simple_otsu_distance
+        counts["simple_otsu"] += 1
 
-        best_image_dict[f"{image_path.name}_{closest_center}"] = images_dict[
-            closest_center
-        ]
-        best_center_dict[f"{image_path.name}_{closest_center}"] = center_dict[
-            closest_center
-        ]
+        # Multi Otsu thresholding
+        for threshold, histogram in itertools.product(
+            thresholding_list, histogram_list
+        ):
+            if threshold >= histogram:
+                continue
+            image_type = f"{threshold}_{histogram}"
+            threshed_image = multi_otsu_thresholding(image, threshold, histogram)
+            threshed_center = find_center_of_gravity(threshed_image)
+            distance = calculate_distance_between_points(threshed_center, mask_center)
+            total_distances[image_type] += distance
+            counts[image_type] += 1
 
-    plot_dict_images(best_image_dict, best_center_dict, mask_center)
-    for key, value in best_image_dict.items():
-        itk.imwrite(value, str(output_data_path / f"{key}.nii.gz"))
+    # Calculate and print running average distances
+    average_distances = {
+        image_type: total_distances[image_type] / counts[image_type]
+        for image_type in image_types
+    }
+    for image_type, avg_distance in average_distances.items():
+        print(f"{image_type}: Average Distance = {avg_distance}")
 
-    print("Finished")
+
+if __name__ == "__main__":
+    main()
