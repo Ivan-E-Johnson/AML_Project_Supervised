@@ -1,4 +1,5 @@
 import pytorch_lightning
+from pytorch_lightning.callbacks import ModelCheckpoint
 from monai.utils import set_determinism
 from monai.transforms import (
     AsDiscrete,
@@ -54,6 +55,7 @@ from monai.transforms import (
     ToTensord,
 )
 from sklearn.model_selection import train_test_split
+
 print_config()
 from pathlib import Path
 
@@ -66,6 +68,7 @@ def init_data_lists(base_data_path):
             image_paths.append(dir / f"{dir.name}_prostate.nii.gz")
             mask_paths.append(dir / f"{dir.name}_segmentation.nii.gz")
     return image_paths, mask_paths
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -98,7 +101,7 @@ class Net(pytorch_lightning.LightningModule):
     def prepare_data(self):
         # set up the correct data path
 
-        base_data_path = Path("/home/iejohnson/programing/Supervised_learning/DATA/SortedProstateData")
+        base_data_path = Path("/home/jsome/PycharmProjects/AML/DATA/SortedProstateData")
         image_paths, mask_paths = init_data_lists(base_data_path)
         train_image_paths, test_image_paths, train_mask_paths, test_mask_paths = train_test_split(image_paths,
                                                                                                   mask_paths,
@@ -113,8 +116,8 @@ class Net(pytorch_lightning.LightningModule):
             for img_path, mask_path in zip(test_image_paths, test_mask_paths)
         ]
 
-        train_files = train_files[:10]
-        val_files = val_files[:1]
+        train_files = train_files
+        val_files = val_files
         # set the data transforms
         RandFlipd_prob = .35
         Spacing_dim = (1.5, 1.5, 3.0)
@@ -218,6 +221,9 @@ class Net(pytorch_lightning.LightningModule):
         self.dice_metric(y_pred=outputs, y=labels)
         d = {"val_loss": loss, "val_number": len(outputs)}
         self.validation_step_outputs.append(d)
+        mean_val_dice = self.dice_metric.aggregate().item()
+        self.log("val_loss", loss, on_step=False, on_epoch=True)
+        self.log("val_dice", mean_val_dice, on_step=False, on_epoch=True)
         return d
 
     def on_validation_epoch_end(self):
@@ -244,20 +250,49 @@ class Net(pytorch_lightning.LightningModule):
         self.validation_step_outputs.clear()  # free memory
         return {"log": tensorboard_logs}
 
+
+class BestModelCheckpoint(pytorch_lightning.callbacks.Callback):
+    def __init__(self, monitor='val_dice', mode='max'):
+        super().__init__()
+        self.monitor = monitor
+        self.mode = mode
+
+    def on_validation_end(self, trainer, pl_module):
+        logs = trainer.callback_metrics
+        if logs is not None:
+            val_dice = logs.get(self.monitor)
+            if val_dice is not None:
+                if self.mode == 'max' and val_dice >= pl_module.best_val_dice:
+                    pl_module.best_val_dice = val_dice
+                    pl_module.best_val_epoch = trainer.current_epoch
+                    # Save the best model
+                    checkpoint_callback = trainer.checkpoint_callback  # Access checkpoint callback from trainer
+                    checkpoint_callback.best_model_path = os.path.join(checkpoint_callback.dirpath, 'best_model.pth')
+                    trainer.save_checkpoint(checkpoint_callback.best_model_path)
+
+
 # initialise the LightningModule
 net = Net()
 
 # set up loggers and checkpoints
-log_dir = os.path.join("/home/iejohnson/PycharmProjects/AML/AML_Project_Supervised", "logs")
+log_dir = os.path.join("/home/jsome/PycharmProjects/AML/AML_Project_Supervised", "logs")
 tb_logger = pytorch_lightning.loggers.TensorBoardLogger(save_dir=log_dir)
 
-# initialise Lightning's trainer.
+checkpoint_callback = ModelCheckpoint(
+    monitor='val_dice',
+    mode='max',
+    save_last=True,
+    dirpath=log_dir,
+    filename='checkpoint-{epoch:02d}-{val_dice:.2f}',
+)
+# Initialise Lightning's trainer with the custom callback
 trainer = pytorch_lightning.Trainer(
     max_epochs=600,
     logger=tb_logger,
     enable_checkpointing=True,
     num_sanity_val_steps=1,
     log_every_n_steps=16,
+    callbacks=[BestModelCheckpoint(), checkpoint_callback],  # Add the custom callback
 )
 
 trainer.fit(net)
