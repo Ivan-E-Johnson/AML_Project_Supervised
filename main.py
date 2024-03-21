@@ -1,3 +1,4 @@
+import numpy as np
 import pytorch_lightning
 from monai.utils import set_determinism
 from monai.transforms import (
@@ -79,15 +80,29 @@ def init_data_lists():
     image_paths = []
     for dir in base_data_path.iterdir():
         if dir.is_dir():
+
             image_paths.append(dir / f"{dir.name}_resampled_normalized_t2w.nii.gz")
             mask_paths.append(dir / f"{dir.name}_resampled_segmentations.nii.gz")
+
     return image_paths, mask_paths
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# Define the network architecture
+class AddChannelD(object):
+    def __init__(self, keys):
+        self.keys = keys
+
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            im = d[key]
+            im = np.expand_dims(im, axis=0)
+            d[key] = im
+        return d
+
+
 class Net(pytorch_lightning.LightningModule):
     """
     This class defines the network architecture.
@@ -114,16 +129,16 @@ class Net(pytorch_lightning.LightningModule):
             num_res_units=2,
             norm=Norm.BATCH,
         )
-        self.loss_function = DiceLoss(sigmoid=True)  # how can we improve this?
+        self.loss_function = DiceLoss(sigmoid=True)
         self.post_pred = Compose(
-            [EnsureType("tensor", device=device), AsDiscrete(argmax=True, to_onehot=4)]
+            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5)]
         )
         self.post_label = Compose(
-            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=4)]
+            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5)]
         )
         self.dice_metric = DiceMetric(
             include_background=False, reduction="mean", get_not_nans=False
-        )  # how can we improve this?
+        )
         self.best_val_dice = 0
         self.best_val_epoch = 0
         self.validation_step_outputs = []
@@ -161,6 +176,8 @@ class Net(pytorch_lightning.LightningModule):
             for img_path, mask_path in zip(test_image_paths, test_mask_paths)
         ]
 
+        train_files = train_files[:10]
+        val_files = val_files[:1]
         # set the data transforms
         RandFlipd_prob = 0.35
 
@@ -328,7 +345,7 @@ if __name__ == "__main__":
     trainer = pytorch_lightning.Trainer(
         max_epochs=600,
         logger=tb_logger,
-        enable_checkpointing=True,
+        # enable_checkpointing=True,
         # enable_progress_bar=True,
         # enable_model_summary=True,
         num_sanity_val_steps=1,
