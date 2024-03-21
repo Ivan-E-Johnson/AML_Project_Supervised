@@ -236,7 +236,7 @@ def find_closest_center(true_center: tuple[int, int, int], center_dict: dict):
     return closest_center
 
 
-def main():
+def compare_average_center_of_mass():
     base_data_path = Path(
         "/home/iejohnson/programing/Supervised_learning/DATA/SortedProstateData"
     )
@@ -305,4 +305,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    compare_average_center_of_mass()
