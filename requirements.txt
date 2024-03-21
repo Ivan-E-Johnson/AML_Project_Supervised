@@ -52,3 +52,4 @@ jupyterlab
 notebook
 python-dotenv
 pytorch-ignite==0.4.13
+pytorch-lightning
