@@ -318,7 +318,7 @@ def compare_average_center_of_mass(base_data_path):
 
 
 def calculate_new_origin_from_center_of_mass(
-    center_of_mass_in_phsyical_space: tuple[int, int, int], spacing, size
+    center_of_mass_in_phsyical_space: tuple[float, float, float], spacing, size
 ):
     return (
         np.array(center_of_mass_in_phsyical_space)
@@ -538,18 +538,20 @@ def pre_process_images(base_data_path: Path):
         subject_name = image_path.name
         image = itk.imread(str(image_path), itk.F)
         mask = itk.imread(str(mask_path), itk.UC)
-        normalized_image = normalize_t2w_images(image)
-        resampled_image, resampled_mask = resample_images_for_training(
-            normalized_image, mask
-        )
+        resampled_image, resampled_mask = resample_images_for_training(image, mask)
+        resampled_normalized_image = normalize_t2w_images(resampled_image)
         resampled_output_path = (
-            output_data_path / subject_name / f"resampled_normalized_t2w.nii.gz"
+            output_data_path
+            / subject_name
+            / f"{subject_name}_resampled_normalized_t2w.nii.gz"
         )
         resampled_mask_path = (
-            output_data_path / subject_name / f"resampled_segmentations.nii.gz"
+            output_data_path
+            / subject_name
+            / f"{subject_name}_resampled_segmentations.nii.gz"
         )
         resampled_output_path.parent.mkdir(exist_ok=True, parents=True)
-        itk.imwrite(resampled_image, resampled_output_path)
+        itk.imwrite(resampled_normalized_image, resampled_output_path)
         itk.imwrite(resampled_mask, resampled_mask_path)
         # TODO: Normalize the images to have a mean of 0 and a standard deviation of 1 for t2W
         df = df._append(
@@ -562,7 +564,7 @@ def pre_process_images(base_data_path: Path):
             },
             ignore_index=True,
         )
-        break
+
     df.to_csv(data_csv, index=False)
 
 
@@ -579,9 +581,10 @@ def normalize_t2w_images(image: itk.Image):
 
 def resample_images_for_training(image: itk.Image, mask: itk.Image):
     x_y_size = 288  # Index
-    x_y_fov = 140  # mm
-    z_fov = 96  # mm
     z_size = 16  # Index
+    x_y_fov = 140  # mm
+    z_fov = 70  # mm
+
     IMAGE_PIXEL_TYPE = itk.F
     MASK_PIXEL_TYPE = itk.UC
     IMAGE_TYPE = itk.Image[itk.F, 3]
@@ -591,13 +594,18 @@ def resample_images_for_training(image: itk.Image, mask: itk.Image):
 
     new_size = [x_y_size, x_y_size, z_size]
     # Get the new in plane spacing for the recentered image
-    new_in_plane_spacing = x_y_size / x_y_fov
-    new_out_of_plane_spacing = z_size / z_fov
+    new_in_plane_spacing = x_y_fov / x_y_size
+    new_out_of_plane_spacing = z_fov / z_size
     new_spacing = [new_in_plane_spacing, new_in_plane_spacing, new_out_of_plane_spacing]
+
+    center_of_mass_in_physical_space = mask.TransformContinuousIndexToPhysicalPoint(
+        center_of_mass
+    )
+    print(f"Center of Mass in Physical Space: {center_of_mass_in_physical_space}")
     new_origin = calculate_new_origin_from_center_of_mass(
-        center_of_mass,
-        list(mask.GetSpacing()),
-        list(mask.GetLargestPossibleRegion().GetSize()),
+        center_of_mass_in_physical_space,
+        new_spacing,
+        new_size,
     )
     new_mask_blank = create_blank_image(
         new_spacing, new_size, new_origin, MASK_PIXEL_TYPE
