@@ -3,6 +3,7 @@ import random
 import itk
 from pathlib import Path
 
+import numpy as np
 from matplotlib import pyplot as plt
 
 from data_connector import get_exploratory_image_info, get_image_stats
@@ -141,7 +142,19 @@ def write_exploratry_image_info(image_paths, mask_paths, output_path):
     mask_df.to_csv("mask_info.csv", index=False)
 
 
-def find_center_of_gravity(image: itk.Image) -> tuple[int, int, int]:
+def find_center_of_gravity_in_index_space(image: itk.Image) -> tuple[int, int, int]:
+    """
+    This function calculates the center of gravity of an image in index space.
+    It first casts the image to unsigned char type, then uses the ImageMomentsCalculator
+    from the itk library to compute the center of gravity in index space.
+    Finally, it transforms the center of gravity from physical space to continuous index space.
+
+    Parameters:
+    image (itk.Image): The input image.
+
+    Returns:
+    tuple[int, int, int]: The center of gravity in continuous index space.
+    """
 
     UC_Image_Type = itk.Image[itk.UC, 3]
     UC_image = cast_to_unsigned_char(image)
@@ -150,11 +163,11 @@ def find_center_of_gravity(image: itk.Image) -> tuple[int, int, int]:
     moments_filter.SetImage(UC_image)
     moments_filter.Compute()
     center_of_gravity_in_physical_space = moments_filter.GetCenterOfGravity()
-    center_of_gravity = image.TransformPhysicalPointToContinuousIndex(
+    center_of_gravity_in_index_space = image.TransformPhysicalPointToContinuousIndex(
         center_of_gravity_in_physical_space
     )
 
-    return center_of_gravity
+    return center_of_gravity_in_index_space
 
 
 def cast_to_unsigned_char(image: itk.Image) -> itk.Image:
@@ -267,15 +280,15 @@ def compare_average_center_of_mass():
         mask = itk.imread(str(mask_path), itk.UC)
 
         # Raw image
-        raw_image_center = find_center_of_gravity(image)
-        mask_center = find_center_of_gravity(mask)
+        raw_image_center = find_center_of_gravity_in_index_space(image)
+        mask_center = find_center_of_gravity_in_index_space(mask)
         raw_distance = calculate_distance_between_points(raw_image_center, mask_center)
         total_distances["raw_image"] += raw_distance
         counts["raw_image"] += 1
 
         # Simple Otsu thresholding
         simple_otsu_image = simple_otsu_thresholding(image)
-        simple_otsu_center = find_center_of_gravity(simple_otsu_image)
+        simple_otsu_center = find_center_of_gravity_in_index_space(simple_otsu_image)
         simple_otsu_distance = calculate_distance_between_points(
             simple_otsu_center, mask_center
         )
@@ -290,7 +303,7 @@ def compare_average_center_of_mass():
                 continue
             image_type = f"{threshold}_{histogram}"
             threshed_image = multi_otsu_thresholding(image, threshold, histogram)
-            threshed_center = find_center_of_gravity(threshed_image)
+            threshed_center = find_center_of_gravity_in_index_space(threshed_image)
             distance = calculate_distance_between_points(threshed_center, mask_center)
             total_distances[image_type] += distance
             counts[image_type] += 1
@@ -304,5 +317,172 @@ def compare_average_center_of_mass():
         print(f"{image_type}: Average Distance = {avg_distance}")
 
 
+def calculate_new_origin_from_center_of_mass(
+    center_of_mass_in_phsyical_space: tuple[int, int, int], spacing, size
+):
+    return (
+        np.array(center_of_mass_in_phsyical_space)
+        - (
+            np.array([(size[0] / 2 - 1), (size[1] / 2 - 1), (size[2] / 2 - 1)])
+            * np.array(spacing)
+        ).tolist()
+    )
+
+
+def get_recentered_image_from_center_of_mass(
+    mask: itk.Image,
+    center_of_mass: tuple[int, int, int],
+    x_extent: int,
+    y_extent: int,
+    z_extent: int,
+):
+    PIXEL_TYPE = itk.UC
+    IMAGE_TYPE = itk.Image[PIXEL_TYPE, 3]
+
+    # Get the region from the bounding box
+    region = itk.ImageRegion[3]()
+
+    size = itk.Size[3]()
+    size[0] = x_extent
+    size[1] = y_extent
+    size[2] = z_extent
+    index = itk.Index[3]()
+    index[0] = 0
+    index[1] = 0
+    index[2] = 0
+    region.SetSize(size)
+    region.SetIndex(index)
+    # Leave direction as identity
+    new_image_origin = calculate_new_origin_from_center_of_mass(
+        center_of_mass, mask.GetSpacing(), size
+    )
+    # Create new Image
+
+    new_centered_image = IMAGE_TYPE.New()
+    new_centered_image.SetRegions(region)
+    new_centered_image.SetSpacing(mask.GetSpacing())
+    new_centered_image.SetOrigin(new_image_origin)
+    new_centered_image.Allocate()
+
+    return new_centered_image
+
+
+def resample_image_to_reference(image: itk.Image, reference_image: itk.Image):
+    IMAGETYPE = itk.Image[itk.UC, 3]
+
+    nearest_neighbor_interpolator = itk.NearestNeighborInterpolateImageFunction[
+        IMAGETYPE, itk.D
+    ].New()
+
+    resampler = itk.ResampleImageFilter[IMAGETYPE, IMAGETYPE].New()
+    resampler.SetInput(image)
+    resampler.SetReferenceImage(reference_image)
+    resampler.UseReferenceImageOn()
+    resampler.UpdateLargestPossibleRegion()
+
+    resampler.SetInterpolator(
+        nearest_neighbor_interpolator
+    )  # Nearest Neighbor interpolation for mask
+    resampler.SetTransform(itk.IdentityTransform[itk.D, 3].New())
+    resampler.Update()
+    return resampler.GetOutput()
+
+
+def round_to_next_largest_16_multiple(number):
+    return int(np.ceil(number / 16) * 16)
+
+
+def find_largest_needed_region_for_prostate(base_data_path: Path):
+    extenstion_factor = 1.10
+    # Get the image and mask paths
+    _, mask_paths = init_data_lists(base_data_path)
+
+    # Write the exploratory image info
+    # Calculate center of mass
+
+    df = pd.DataFrame()
+
+    for mask_path in mask_paths:
+
+        mask = itk.imread(str(mask_path), itk.UC)
+        mask = convert_multiclass_mask_to_binary(mask)
+        # number_non_zero = np.count_nonzero(itk.GetArrayViewFromImage(mask))
+        # print(f"Number of non zero pixels in mask: {number_non_zero}")
+
+        center_of_mass = mask.TransformPhysicalPointToIndex(
+            find_center_of_gravity_in_index_space(mask)
+        )
+
+        # Todo figure out what region will fit the largest prostate available + 10%
+        bounding_box = get_mask_bounding_box(mask, 1)
+        x_extent, y_extent, z_extent = calculate_bounding_box_extent(mask)
+        x_extended = int(x_extent * extenstion_factor)
+        y_extended = int(y_extent * extenstion_factor)
+        z_extended = int(z_extent * extenstion_factor)
+        x_rounded = round_to_next_largest_16_multiple(x_extended)
+        y_rounded = round_to_next_largest_16_multiple(y_extended)
+        z_rounded = round_to_next_largest_16_multiple(z_extended)
+
+        # recentered_image = get_recentered_image_from_center_of_mass(mask, center_of_mass, x_extent, y_extent, z_extent)
+        # extended_recentered_image = get_recentered_image_from_center_of_mass(mask, center_of_mass, int(x_extent*extenstion_factor), int(y_extent*extenstion_factor), int(z_extent*extenstion_factor))
+        # rounded_extended_recentered_image = get_recentered_image_from_center_of_mass(mask, center_of_mass, x_rounded, y_rounded, z_rounded)
+        # # Resample the mask to the recentered image
+        # recentered_image = resample_image_to_reference(mask, recentered_image)
+        # extended_recentered_image = resample_image_to_reference(mask, extended_recentered_image)
+        #
+        # number_non_zero = np.count_nonzero(itk.GetArrayViewFromImage(recentered_image))
+        # number_non_zero_extended = np.count_nonzero(itk.GetArrayViewFromImage(extended_recentered_image))
+        # print(f"Number of non zero pixels in recentered image: {number_non_zero}")
+        # print(f"Number of non zero pixels in extended recentered image: {number_non_zero_extended}")
+
+        df = df._append(
+            {
+                "mask_name": mask_path.name,
+                "x_extent": x_extent,
+                "y_extent": y_extent,
+                "z_extent": z_extent,
+                "x_extended": x_extended,
+                "y_extended": y_extended,
+                "z_extended": z_extended,
+                "x_rounded": x_rounded,
+                "y_rounded": y_rounded,
+                "z_rounded": z_rounded,
+            },
+            ignore_index=True,
+        )
+        print(f"Bounding Box: {bounding_box}")
+
+        print(f"Center of Mass for {mask_path.name}: {center_of_mass}")
+        # TODO Fix this and verify
+        # Unsure why this is not working but can skip for now
+        # itk.imwrite(recentered_image, f"recentered_{mask_path.name}")
+        # itk.imwrite(extended_recentered_image, f"extended_recentered_{mask_path.name}")
+
+    # Largest possible size for prostate given a 10% buffer itkSize3 ([224, 192, 32])
+
+    df.to_csv("largest_region_info.csv", index=False)
+
+
+def pre_process_images(base_data_path: Path):
+    # Get the image and mask paths
+    image_paths, mask_paths = init_data_lists(base_data_path)
+
+    # Write the exploratory image info
+    # Calculate center of mass
+    for image_path, mask_path in zip(image_paths, mask_paths):
+        image = itk.imread(str(image_path), itk.F)
+        mask = itk.imread(str(mask_path), itk.UC)
+        center_of_mass = find_center_of_gravity_in_index_space(mask)
+        # Todo figure out what region will fit the largest prostate available + 10%
+
+        print(f"Center of Mass for {mask_path.name}: {center_of_mass}")
+        break
+        # TODO: Normalize the images to have a mean of 0 and a standard deviation of 1 for t2W
+
+
 if __name__ == "__main__":
-    compare_average_center_of_mass()
+    base_data_path = Path(
+        "/Users/iejohnson/School/spring_2024/AML/Supervised_learning/DATA/SortedProstateData"
+    )
+    find_largest_needed_region_for_prostate(base_data_path)
+    print("Finshed")
