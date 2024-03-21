@@ -535,7 +535,7 @@ def pre_process_images(base_data_path: Path):
     data_csv = output_data_path / "image_info.csv"
     df = pd.DataFrame()
     for image_path, mask_path in zip(image_paths, mask_paths):
-        subject_name = image_path.name
+        subject_name = image_path.name.split(".")[0]
         image = itk.imread(str(image_path), itk.F)
         mask = itk.imread(str(mask_path), itk.UC)
         resampled_image, resampled_mask = resample_images_for_training(image, mask)
@@ -649,12 +649,12 @@ def resample_images_for_training(image: itk.Image, mask: itk.Image):
 
 
 if __name__ == "__main__":
-    base_data_path = Path(
-        "/Users/iejohnson/School/spring_2024/AML/Supervised_learning/DATA/SortedProstateData"
-    )
     # base_data_path = Path(
-    #     "/home/iejohnson/programing/Supervised_learning/DATA/SortedProstateData"
+    #     "/Users/iejohnson/School/spring_2024/AML/Supervised_learning/DATA/SortedProstateData"
     # )
+    base_data_path = Path(
+        "/home/iejohnson/programing/Supervised_learning/DATA/SortedProstateData"
+    )
     # find_largest_needed_region_for_prostate(base_data_path)
     # compare_average_center_of_mass(base_data_path)
     pre_process_images(base_data_path)
