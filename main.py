@@ -12,6 +12,7 @@ from monai.transforms import (
     ScaleIntensityRanged,
     Spacingd,
     EnsureType,
+    DataStats,
 )
 from monai.networks.nets import UNet
 from monai.networks.layers import Norm
@@ -129,12 +130,12 @@ class Net(pytorch_lightning.LightningModule):
             num_res_units=2,
             norm=Norm.BATCH,
         )
-        self.loss_function = DiceLoss(sigmoid=True)
+        self.loss_function = DiceLoss(softmax=True, to_onehot_y=True)
         self.post_pred = Compose(
-            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5)]
+            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5), DataStats()]
         )
         self.post_label = Compose(
-            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5)]
+            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5), DataStats()]
         )
         self.dice_metric = DiceMetric(
             include_background=False, reduction="mean", get_not_nans=False
@@ -195,7 +196,7 @@ class Net(pytorch_lightning.LightningModule):
                 RandFlipd(keys=["image", "label"], prob=RandFlipd_prob, spatial_axis=0),
                 RandFlipd(keys=["image", "label"], prob=RandFlipd_prob, spatial_axis=1),
                 RandFlipd(keys=["image", "label"], prob=RandFlipd_prob, spatial_axis=2),
-                ToTensord(keys=["image", "label"]),
+                # ToTensord(keys=["image", "label"], device=device),
                 # DataStatsD(keys=["image", "label"]),
             ]
         )
@@ -205,7 +206,7 @@ class Net(pytorch_lightning.LightningModule):
                 EnsureChannelFirstD(
                     keys=["image", "label"]
                 ),  # Add channel to image and mask so
-                ToTensord(keys=["image", "label"]),
+                # ToTensord(keys=["image", "label"], device=device),
             ]
         )
 
@@ -213,13 +214,13 @@ class Net(pytorch_lightning.LightningModule):
         self.train_ds = CacheDataset(
             data=train_files,
             transform=self.train_transforms,
-            cache_rate=1.0,
+            cache_rate=0.5,
             num_workers=4,
         )
         self.val_ds = CacheDataset(
             data=val_files,
             transform=self.validation_transforms,
-            cache_rate=1.0,
+            cache_rate=0.5,
             num_workers=4,
         )
 
@@ -271,31 +272,31 @@ class Net(pytorch_lightning.LightningModule):
         dict: The loss and the logs.
         """
         images, labels = batch["image"], batch["label"]
+        print("Training Step")
+        print(f"Images.Shape = {images.shape}")
+        print(f"Labels.Shape = {labels.shape}")
         output = self.forward(images)
-        print(output.shape)
+        print(f"Output shape {output.shape}")
         loss = self.loss_function(output, labels)
         tensorboard_logs = {"train_loss": loss.item()}
         return {"loss": loss, "log": tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        """
-        This function defines the validation step.
-
-        Args:
-        batch (dict): The batch of data.
-        batch_idx (int): The index of the batch.
-
-        Returns:
-        dict: The validation loss and the number of items.
-        """
         images, labels = batch["image"], batch["label"]
-        print(images.shape)
-        print(labels.shape)
+        print("Validation Step")
+        print(f"Images.Shape = {images.shape}")
+        print(f"Labels.Shape = {labels.shape}")
         outputs = self.forward(images)
-        print(outputs.shape)
+        print(f"Outputs shape {outputs.shape}")
+        print(f"Shape before post_pred: {outputs.shape}")
+        outputs = torch.stack(
+            [self.post_pred(i) for i in decollate_batch(outputs)]
+        )  # Stack the processed outputs back into a tensor
+        labels = torch.stack(
+            [self.post_label(i) for i in decollate_batch(labels)]
+        )  # Do the same for labels if necessary
+        print(f"Shape after post_pred: {outputs.shape}")
         loss = self.loss_function(outputs, labels)
-        outputs = [self.post_pred(i) for i in decollate_batch(outputs)]
-        labels = [self.post_label(i) for i in decollate_batch(labels)]
         self.dice_metric(y_pred=outputs, y=labels)
         d = {"val_loss": loss, "val_number": len(outputs)}
         self.validation_step_outputs.append(d)
@@ -340,14 +341,15 @@ if __name__ == "__main__":
     tb_logger = pytorch_lightning.loggers.TensorBoardLogger(
         save_dir=log_dir, name="lightning_logs"
     )
-
+    os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     # initialise Lightning's trainer.
     trainer = pytorch_lightning.Trainer(
         max_epochs=600,
         logger=tb_logger,
-        # enable_checkpointing=True,
-        # enable_progress_bar=True,
-        # enable_model_summary=True,
+        enable_checkpointing=True,
+        enable_progress_bar=True,
+        enable_model_summary=True,
         num_sanity_val_steps=1,
         log_every_n_steps=16,
     )
