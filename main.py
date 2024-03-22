@@ -132,7 +132,7 @@ class Net(pytorch_lightning.LightningModule):
             norm=Norm.BATCH,
         )
 
-        self.loss_function = DiceLoss(softmax=True)
+        self.loss_function = DiceLoss(softmax=True, to_onehot_y=True, squared_pred=True)
         # self.post_pred = pass # TODO add post processing transformations to correctly process the multi-class output
         # self.post_label = pass # TODO add post processing transformations to correctly process the multi-class output
         self.post_pred = Compose(
@@ -148,9 +148,6 @@ class Net(pytorch_lightning.LightningModule):
         self.post_label = Compose(
             [
                 EnsureType(),  # Ensure tensor type
-                AsDiscrete(
-                    to_onehot=self.number_of_classes
-                ),  # Ensure labels are in one-hot encoded format
             ]
         )
         self.dice_metric = DiceMetric(
