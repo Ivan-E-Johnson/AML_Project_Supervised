@@ -17,8 +17,8 @@ from monai.transforms import (
 )
 from monai.networks.nets import UNet
 from monai.networks.layers import Norm
-from monai.metrics import DiceMetric
-from monai.losses import DiceLoss
+from monai.metrics import DiceMetric, ConfusionMatrixMetric
+from monai.losses import DiceLoss, DiceCELoss
 from monai.inferers import sliding_window_inference
 from monai.data import CacheDataset, list_data_collate, decollate_batch, DataLoader
 from monai.config import print_config
@@ -57,6 +57,7 @@ from monai.transforms import (
     RandCropByPosNegLabeld,
     ToTensord,
 )
+from pytorch_lightning.cli import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 
 print_config()
@@ -133,9 +134,12 @@ class Net(pytorch_lightning.LightningModule):
             norm=Norm.BATCH,
         )
 
-        self.loss_function = DiceLoss(softmax=True, to_onehot_y=True, squared_pred=True)
-        # self.post_pred = pass # TODO add post processing transformations to correctly process the multi-class output
-        # self.post_label = pass # TODO add post processing transformations to correctly process the multi-class output
+        self.loss_function = DiceCELoss(
+            softmax=True, to_onehot_y=True, squared_pred=True
+        )  # TODO Implement secondary loss functions
+
+        # TODO implement this sensitivity metric
+        # self.sensitivity_metric = ConfusionMatrixMetric(metric_name="sensitivity", compute_sample=True,)
         self.post_pred = Compose(
             [
                 EnsureType(),  # Ensure tensor type
@@ -151,12 +155,13 @@ class Net(pytorch_lightning.LightningModule):
                 EnsureType(),  # Ensure tensor type
             ]
         )
+        # TODO ADD Other metrics
         self.dice_metric = DiceMetric(
             include_background=False,
             reduction="mean",
             get_not_nans=False,
             num_classes=self.number_of_classes,
-        )  # TODO ENSURE THAT THE DICE METRIC IS SET UP CORRECTLY FOR MULTI-CLASS SEGMENTATION TASKS
+        )
         self.best_val_dice = 0
         self.best_val_epoch = 0
         self.validation_step_outputs = []
@@ -194,13 +199,10 @@ class Net(pytorch_lightning.LightningModule):
             for img_path, mask_path in zip(test_image_paths, test_mask_paths)
         ]
 
-        train_files = train_files[:5]
-        val_files = val_files[:1]
         # set the data transforms
         RandFlipd_prob = 0.35
 
         # set deterministic training for reproducibility
-        set_determinism(seed=0)
 
         # define the data transforms
         self.train_transforms = Compose(
@@ -251,7 +253,7 @@ class Net(pytorch_lightning.LightningModule):
         """
         train_loader = DataLoader(
             self.train_ds,
-            batch_size=1,
+            batch_size=5,
             shuffle=True,
             num_workers=4,
             collate_fn=list_data_collate,
@@ -265,18 +267,24 @@ class Net(pytorch_lightning.LightningModule):
         Returns:
         DataLoader: The validation data loader.
         """
-        val_loader = DataLoader(self.val_ds, batch_size=1, num_workers=4)
+        val_loader = DataLoader(self.val_ds, batch_size=2, num_workers=4)
         return val_loader
 
     def configure_optimizers(self):
-        """
-        This function configures the optimizer.
-
-        Returns:
-        Adam: The Adam optimizer.
-        """
-        optimizer = torch.optim.Adam(self._model.parameters(), 1e-4)
-        return optimizer
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
+        scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=0.1,
+            patience=10,
+            verbose=True,
+            monitor="val_loss",
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": scheduler,
+            "monitor": "val_loss",
+        }
 
     def training_step(self, batch, batch_idx):
         """
@@ -316,9 +324,10 @@ class Net(pytorch_lightning.LightningModule):
         print(f"Shape after post_pred: {outputs.shape}")
         loss = self.loss_function(outputs, labels)
         self.dice_metric(y_pred=outputs, y=labels)
-        d = {"val_loss": loss, "val_number": len(outputs)}
-        self.validation_step_outputs.append(d)
         mean_val_dice = self.dice_metric.aggregate().item()
+        d = {"val_loss": loss, "val_number": len(outputs), "val_dice": mean_val_dice}
+        self.validation_step_outputs.append(d)
+        # self.log('val_sensitivity', sensitivity, on_step=False, on_epoch=True)
         self.log("val_loss", loss, on_step=False, on_epoch=True)
         self.log("val_dice", mean_val_dice, on_step=False, on_epoch=True)
         return d
