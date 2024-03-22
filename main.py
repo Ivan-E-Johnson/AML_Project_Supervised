@@ -121,25 +121,44 @@ class Net(pytorch_lightning.LightningModule):
 
     def __init__(self):
         super().__init__()
+        self.number_of_classes = 5  # INCLUDES BACKGROUND
         self._model = UNet(
             spatial_dims=3,
             in_channels=1,
-            out_channels=1,
+            out_channels=self.number_of_classes,
             channels=(16, 32, 64, 128, 256),  # Number of features in each layer
             strides=(2, 2, 2, 2),
             num_res_units=2,
             norm=Norm.BATCH,
         )
-        self.loss_function = DiceLoss(softmax=True, to_onehot_y=True)
+
+        self.loss_function = DiceLoss(softmax=True)
+        # self.post_pred = pass # TODO add post processing transformations to correctly process the multi-class output
+        # self.post_label = pass # TODO add post processing transformations to correctly process the multi-class output
         self.post_pred = Compose(
-            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5), DataStats()]
+            [
+                EnsureType(),  # Ensure tensor type
+                Activations(softmax=True),  # Apply softmax to output logits
+                AsDiscrete(
+                    argmax=True, to_onehot=self.number_of_classes
+                ),  # Convert to one-hot encoded format
+            ]
         )
+
         self.post_label = Compose(
-            [EnsureType("tensor", device=device), AsDiscrete(to_onehot=5), DataStats()]
+            [
+                EnsureType(),  # Ensure tensor type
+                AsDiscrete(
+                    to_onehot=self.number_of_classes
+                ),  # Ensure labels are in one-hot encoded format
+            ]
         )
         self.dice_metric = DiceMetric(
-            include_background=False, reduction="mean", get_not_nans=False
-        )
+            include_background=False,
+            reduction="mean",
+            get_not_nans=False,
+            num_classes=self.number_of_classes,
+        )  # TODO ENSURE THAT THE DICE METRIC IS SET UP CORRECTLY FOR MULTI-CLASS SEGMENTATION TASKS
         self.best_val_dice = 0
         self.best_val_epoch = 0
         self.validation_step_outputs = []
@@ -177,7 +196,7 @@ class Net(pytorch_lightning.LightningModule):
             for img_path, mask_path in zip(test_image_paths, test_mask_paths)
         ]
 
-        train_files = train_files[:10]
+        train_files = train_files[:5]
         val_files = val_files[:1]
         # set the data transforms
         RandFlipd_prob = 0.35
@@ -196,7 +215,7 @@ class Net(pytorch_lightning.LightningModule):
                 RandFlipd(keys=["image", "label"], prob=RandFlipd_prob, spatial_axis=0),
                 RandFlipd(keys=["image", "label"], prob=RandFlipd_prob, spatial_axis=1),
                 RandFlipd(keys=["image", "label"], prob=RandFlipd_prob, spatial_axis=2),
-                # ToTensord(keys=["image", "label"], device=device),
+                ToTensord(keys=["image", "label"]),
                 # DataStatsD(keys=["image", "label"]),
             ]
         )
@@ -206,7 +225,8 @@ class Net(pytorch_lightning.LightningModule):
                 EnsureChannelFirstD(
                     keys=["image", "label"]
                 ),  # Add channel to image and mask so
-                # ToTensord(keys=["image", "label"], device=device),
+                ToTensord(keys=["image", "label"]),
+                DataStatsD(keys=["image", "label"]),
             ]
         )
 
@@ -351,7 +371,7 @@ if __name__ == "__main__":
         enable_progress_bar=True,
         enable_model_summary=True,
         num_sanity_val_steps=1,
-        log_every_n_steps=16,
+        log_every_n_steps=1,
     )
 
     trainer.fit(net)
