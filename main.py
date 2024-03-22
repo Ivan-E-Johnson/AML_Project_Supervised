@@ -1,5 +1,6 @@
 import numpy as np
 import pytorch_lightning
+from pytorch_lightning.callbacks import ModelCheckpoint
 from monai.utils import set_determinism
 from monai.transforms import (
     AsDiscrete,
@@ -347,6 +348,30 @@ class Net(pytorch_lightning.LightningModule):
         return {"log": tensorboard_logs}
 
 
+class BestModelCheckpoint(pytorch_lightning.callbacks.Callback):
+    def __init__(self, monitor="val_dice", mode="max"):
+        super().__init__()
+        self.monitor = monitor
+        self.mode = mode
+
+    def on_validation_end(self, trainer, pl_module):
+        logs = trainer.callback_metrics
+        if logs is not None:
+            val_dice = logs.get(self.monitor)
+            if val_dice is not None:
+                if self.mode == "max" and val_dice >= pl_module.best_val_dice:
+                    pl_module.best_val_dice = val_dice
+                    pl_module.best_val_epoch = trainer.current_epoch
+                    # Save the best model
+                    checkpoint_callback = (
+                        trainer.checkpoint_callback
+                    )  # Access checkpoint callback from trainer
+                    checkpoint_callback.best_model_path = os.path.join(
+                        checkpoint_callback.dirpath, "best_model.pth"
+                    )
+                    trainer.save_checkpoint(checkpoint_callback.best_model_path)
+
+
 if __name__ == "__main__":
     # initialise the LightningModule
     net = Net()
@@ -361,6 +386,14 @@ if __name__ == "__main__":
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     # initialise Lightning's trainer.
+
+    checkpoint_callback = ModelCheckpoint(
+        monitor="val_dice",
+        mode="max",
+        save_last=True,
+        dirpath=log_dir,
+        filename="checkpoint-{epoch:02d}-{val_dice:.2f}",
+    )
     trainer = pytorch_lightning.Trainer(
         max_epochs=600,
         logger=tb_logger,
@@ -368,7 +401,11 @@ if __name__ == "__main__":
         enable_progress_bar=True,
         enable_model_summary=True,
         num_sanity_val_steps=1,
-        log_every_n_steps=1,
+        log_every_n_steps=5,
+        callbacks=[
+            BestModelCheckpoint(),
+            checkpoint_callback,
+        ],  # Add the custom callback
     )
 
     trainer.fit(net)
