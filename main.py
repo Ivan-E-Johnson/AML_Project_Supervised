@@ -318,6 +318,9 @@ class Net(pytorch_lightning.LightningModule):
         self.dice_metric(y_pred=outputs, y=labels)
         d = {"val_loss": loss, "val_number": len(outputs)}
         self.validation_step_outputs.append(d)
+        mean_val_dice = self.dice_metric.aggregate().item()
+        self.log("val_loss", loss, on_step=False, on_epoch=True)
+        self.log("val_dice", mean_val_dice, on_step=False, on_epoch=True)
         return d
 
     def on_validation_epoch_end(self):
