@@ -78,7 +78,9 @@ def init_data_lists():
     list: A list of image paths.
     list: A list of mask paths.
     """
-    base_data_path = Path("/home/jsome/PycharmProjects/AML/DATA/preprocessed_data")
+    base_data_path = Path(
+        "/home/iejohnson/programing/Supervised_learning/DATA/preprocessed_data"
+    )
     mask_paths = []
     image_paths = []
     for dir in base_data_path.iterdir():
@@ -123,7 +125,7 @@ class Net(pytorch_lightning.LightningModule):
 
     def __init__(self):
         super().__init__()
-        self.number_of_classes = 4  # INCLUDES BACKGROUND
+        self.number_of_classes = 5  # INCLUDES BACKGROUND
         self._model = UNet(
             spatial_dims=3,
             in_channels=1,
@@ -266,7 +268,7 @@ class Net(pytorch_lightning.LightningModule):
         Returns:
         DataLoader: The validation data loader.
         """
-        val_loader = DataLoader(self.val_ds, batch_size=2, num_workers=4)
+        val_loader = DataLoader(self.val_ds, batch_size=1, num_workers=4)
         return val_loader
 
     def configure_optimizers(self):
@@ -407,12 +409,10 @@ if __name__ == "__main__":
     # set up loggers and checkpoints
     # initialise the LightningModule
     net = Net()
-
-    log_dir = os.path.join(
-        "/home/jsome/PycharmProjects/AML/AML_Project_Supervised", "logs"
-    )
+    current_file_loc = Path(__file__).parent
+    log_dir = current_file_loc / "logs"
     tb_logger = pytorch_lightning.loggers.TensorBoardLogger(
-        save_dir=log_dir, name="lightning_logs"
+        save_dir=log_dir.as_posix(), name="lightning_logs"
     )
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -422,11 +422,11 @@ if __name__ == "__main__":
         monitor="val_dice",
         mode="max",
         save_last=True,
-        dirpath=log_dir,
+        dirpath=log_dir.as_posix(),
         filename="checkpoint-{epoch:02d}-{val_dice:.2f}",
     )
     trainer = pytorch_lightning.Trainer(
-        max_epochs=2,
+        max_epochs=20,
         logger=tb_logger,
         enable_checkpointing=True,
         enable_progress_bar=True,
