@@ -309,13 +309,6 @@ class Net(pytorch_lightning.LightningModule):
         predictions = torch.argmax(output, dim=1)  # Assuming output is logits
         targets = labels  # Assuming labels are already one-hot encoded
         accuracy = accuracy_score(targets.flatten(), predictions.flatten())
-        precision = precision_score(
-            targets.flatten(), predictions.flatten(), average="weighted"
-        )
-        recall = recall_score(
-            targets.flatten(), predictions.flatten(), average="weighted"
-        )
-        f1 = f1_score(targets.flatten(), predictions.flatten(), average="weighted")
 
         # Log metrics
         self.log("train_loss", loss, on_step=True, on_epoch=False, reduce_fx=torch.mean)
@@ -325,19 +318,6 @@ class Net(pytorch_lightning.LightningModule):
             on_step=True,
             on_epoch=False,
             reduce_fx=torch.mean,
-        )
-        self.log(
-            "train_precision",
-            precision,
-            on_step=True,
-            on_epoch=False,
-            reduce_fx=torch.mean,
-        )
-        self.log(
-            "train_recall", recall, on_step=True, on_epoch=False, reduce_fx=torch.mean
-        )
-        self.log(
-            "train_f1_score", f1, on_step=True, on_epoch=False, reduce_fx=torch.mean
         )
 
     def validation_step(self, batch, batch_idx):
@@ -361,16 +341,12 @@ class Net(pytorch_lightning.LightningModule):
 
         # Calculate accuracy, precision, recall, and F1 score
 
-        predictions = torch.argmax(outputs, dim=1)  # Assuming outputs are logits
         targets = labels  # Assuming labels are already one-hot encoded
-        accuracy = accuracy_score(targets.flatten(), predictions.flatten())
+        accuracy = accuracy_score(targets.flatten(), outputs.flatten())
         precision = precision_score(
-            targets.flatten(), predictions.flatten(), average="weighted"
+            targets.flatten(), outputs.flatten(), average="weighted"
         )
-        recall = recall_score(
-            targets.flatten(), predictions.flatten(), average="weighted"
-        )
-        f1 = f1_score(targets.flatten(), predictions.flatten(), average="weighted")
+        recall = recall_score(targets.flatten(), outputs.flatten(), average="weighted")
 
         # Log metrics
         self.log("val_dice", mean_val_dice, on_step=False, on_epoch=True)
@@ -378,7 +354,6 @@ class Net(pytorch_lightning.LightningModule):
         self.log("val_accuracy", accuracy, on_step=False, on_epoch=True)
         self.log("val_precision", precision, on_step=False, on_epoch=True)
         self.log("val_recall", recall, on_step=False, on_epoch=True)
-        self.log("val_f1_score", f1, on_step=False, on_epoch=True)
 
 
 class BestModelCheckpoint(pytorch_lightning.callbacks.Callback):
@@ -412,7 +387,7 @@ if __name__ == "__main__":
     current_file_loc = Path(__file__).parent
     log_dir = current_file_loc / "logs"
     tb_logger = pytorch_lightning.loggers.TensorBoardLogger(
-        save_dir=log_dir.as_posix(), name="lightning_logs"
+        save_dir=log_dir.as_posix(), name="3_26_24_lightning_logs"
     )
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -428,9 +403,8 @@ if __name__ == "__main__":
     trainer = pytorch_lightning.Trainer(
         max_epochs=20,
         logger=tb_logger,
+        accelerator="gpu",
         enable_checkpointing=True,
-        enable_progress_bar=True,
-        enable_model_summary=True,
         num_sanity_val_steps=1,
         log_every_n_steps=5,
         callbacks=[
