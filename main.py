@@ -58,6 +58,7 @@ from monai.transforms import (
     ToTensord,
 )
 from pytorch_lightning.cli import ReduceLROnPlateau
+from pytorch_lightning.profilers import SimpleProfiler
 from sklearn.metrics import precision_score, accuracy_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split
 from torch.utils.tensorboard._utils import make_grid
@@ -319,6 +320,7 @@ class Net(pytorch_lightning.LightningModule):
             on_epoch=False,
             reduce_fx=torch.mean,
         )
+        return loss
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch["image"], batch["label"]
@@ -340,20 +342,49 @@ class Net(pytorch_lightning.LightningModule):
         mean_val_dice = self.dice_metric.aggregate().item()
 
         # Calculate accuracy, precision, recall, and F1 score
-
+        predictions = torch.argmax(outputs, dim=1)  # Assuming output is logits
         targets = labels  # Assuming labels are already one-hot encoded
-        accuracy = accuracy_score(targets.flatten(), outputs.flatten())
+        accuracy = accuracy_score(targets.flatten(), predictions.flatten())
         precision = precision_score(
-            targets.flatten(), outputs.flatten(), average="weighted"
+            targets.flatten(), predictions.flatten(), average="weighted"
         )
-        recall = recall_score(targets.flatten(), outputs.flatten(), average="weighted")
+        recall = recall_score(
+            targets.flatten(), predictions.flatten(), average="weighted"
+        )
 
         # Log metrics
-        self.log("val_dice", mean_val_dice, on_step=False, on_epoch=True)
-        self.log("val_loss", loss, on_step=False, on_epoch=True)
-        self.log("val_accuracy", accuracy, on_step=False, on_epoch=True)
-        self.log("val_precision", precision, on_step=False, on_epoch=True)
-        self.log("val_recall", recall, on_step=False, on_epoch=True)
+        self.log(
+            "val_dice",
+            mean_val_dice,
+            on_step=False,
+            on_epoch=True,
+            batch_size=images.shape[0],
+        )
+        self.log(
+            "val_loss", loss, on_step=False, on_epoch=True, batch_size=images.shape[0]
+        )
+        self.log(
+            "val_accuracy",
+            accuracy,
+            on_step=False,
+            on_epoch=True,
+            batch_size=images.shape[0],
+        )
+        self.log(
+            "val_precision",
+            precision,
+            on_step=False,
+            on_epoch=True,
+            batch_size=images.shape[0],
+        )
+        self.log(
+            "val_recall",
+            recall,
+            on_step=False,
+            on_epoch=True,
+            batch_size=images.shape[0],
+        )
+        return loss
 
 
 class BestModelCheckpoint(pytorch_lightning.callbacks.Callback):
@@ -397,7 +428,7 @@ if __name__ == "__main__":
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     # initialise Lightning's trainer.
-
+    profiler = SimpleProfiler()
     checkpoint_callback = ModelCheckpoint(
         monitor="val_dice",
         mode="max",
@@ -406,12 +437,13 @@ if __name__ == "__main__":
         filename="checkpoint-{epoch:02d}-{val_dice:.2f}",
     )
     trainer = pytorch_lightning.Trainer(
-        max_epochs=20,
+        max_epochs=10,
         logger=tb_logger,
-        accelerator="gpu",
+        # accelerator="gpu",
         enable_checkpointing=True,
         num_sanity_val_steps=1,
         log_every_n_steps=5,
+        profiler=profiler,
         callbacks=[
             BestModelCheckpoint(),
             checkpoint_callback,
