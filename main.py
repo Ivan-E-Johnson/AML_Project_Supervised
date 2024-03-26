@@ -381,6 +381,11 @@ class BestModelCheckpoint(pytorch_lightning.callbacks.Callback):
 
 
 if __name__ == "__main__":
+    print("*" * 80)
+    print(f"Device: {device}")
+    print(f"Cuda available: {torch.cuda.is_available()}")
+    print("*" * 80)
+
     # set up loggers and checkpoints
     # initialise the LightningModule
     net = Net()
