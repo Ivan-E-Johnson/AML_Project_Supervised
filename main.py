@@ -381,6 +381,47 @@ class Net(pytorch_lightning.LightningModule):
         )
         return loss
 
+    def on_validation_epoch_end(self):
+        # Get the first batch of the validation data
+        val_loader = self.val_dataloader()
+        images, labels = (
+            next(iter(val_loader))["image"],
+            next(iter(val_loader))["label"],
+        )
+
+        # Move images and labels to device
+        images = images.to(device)
+        labels = labels.to(device)
+
+        # Run the inference
+        outputs = self.forward(images)
+        predictions = torch.argmax(outputs, dim=1, keepdim=True)
+
+        # Convert the tensors to numpy arrays for saving with ITK
+        images_np = images.cpu().numpy()
+        predictions_np = predictions.cpu().numpy()
+
+        images_np = np.squeeze(images_np, axis=1)
+        predictions_np = np.squeeze(predictions_np, axis=1)
+
+        for i in range(min(5, images_np.shape[0])):
+            single_image = images_np[i, :, :, :]
+            single_prediction = predictions_np[i, :, :, :]
+            plt.figure(figsize=(10, 10))
+            plt.subplot(1, 2, 1)
+            middle_slice = single_image.shape[-1] // 2
+            plt.imshow(single_image[:, :, middle_slice], cmap="gray")
+            plt.title("Image")
+            plt.subplot(1, 2, 2)
+            plt.imshow(single_prediction[:, :, middle_slice], cmap="gray")
+            plt.title("Prediction")
+            self.logger.experiment.add_figure(
+                f"image_prediction_{i}", plt.gcf(), global_step=self.current_epoch
+            )
+            # TODO See if this works
+            # self.logger.experiment.add_figure(f"image_{i}", plt.imshow(single_image[:, :, middle_slice], cmap="gray"), global_step=self.current_epoch)
+            # self.logger.experiment.add_figure(f"prediction_{i}", plt.imshow(single_prediction[:, :, middle_slice], cmap="gray"), global_step=self.current_epoch)
+
     def run_example_inference(self):
         # Get the first batch of the validation data
         val_loader = self.val_dataloader()
