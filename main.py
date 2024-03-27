@@ -312,7 +312,7 @@ class Net(pytorch_lightning.LightningModule):
         predictions = torch.argmax(
             output, dim=1, keepdim=True
         )  # Assuming output is logits
-        dice = self.dice_metric(y_pred=predictions, y=labels)
+        dice = self.dice_metric(y_pred=predictions, y=labels).mean()
         # Log metrics
         self.log(
             "train_dice",
@@ -341,7 +341,7 @@ class Net(pytorch_lightning.LightningModule):
             outputs, dim=1, keepdim=True
         )  # Assuming output is logits
 
-        dice = self.dice_metric(y_pred=predictions, y=labels)
+        dice = self.dice_metric(y_pred=predictions, y=labels).mean()
 
         if self.is_testing:
             print(f"Predictions shape: {predictions.shape}")
@@ -492,26 +492,27 @@ if __name__ == "__main__":
         filename="checkpoint-{epoch:02d}-{val_dice:.2f}",
     )
 
-    images, labels, predictions = net.run_example_inference()
-
     #
     # print(f"Images shape: {images.shape}")
     # print(f"Labels shape: {labels.shape}")
     # print(f"Predictions shape: {predictions.shape}")
 
-    # trainer = pytorch_lightning.Trainer(
-    #     max_epochs=10,
-    #     logger=tb_logger,
-    #     # accelerator="gpu",
-    #     enable_checkpointing=True,
-    #     num_sanity_val_steps=1,
-    #     log_every_n_steps=1,
-    #     profiler=profiler,
-    #     callbacks=[
-    #         BestModelCheckpoint(),
-    #         checkpoint_callback,
-    #     ],  # Add the custom callback
-    # )
-    #
-    # trainer.fit(net)
+    trainer = pytorch_lightning.Trainer(
+        max_epochs=1,
+        logger=tb_logger,
+        # accelerator="gpu",
+        enable_checkpointing=True,
+        num_sanity_val_steps=1,
+        log_every_n_steps=1,
+        profiler=profiler,
+        callbacks=[
+            BestModelCheckpoint(),
+            checkpoint_callback,
+        ],  # Add the custom callback
+    )
+
+    trainer.fit(net)
+    net = Net.load_from_checkpoint(checkpoint_callback.best_model_path)
+    net.run_example_inference()
+
     print("Finished training")
