@@ -1,3 +1,4 @@
+import itk
 import numpy as np
 import pytorch_lightning
 from pytorch_lightning.callbacks import ModelCheckpoint
