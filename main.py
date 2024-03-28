@@ -16,7 +16,7 @@ from monai.transforms import (
     EnsureType,
     DataStats,
 )
-from monai.networks.nets import UNet
+from monai.networks.nets import UNet, SwinUNETR
 from monai.networks.layers import Norm
 from monai.metrics import DiceMetric, ConfusionMatrixMetric
 from monai.losses import DiceLoss, DiceCELoss
@@ -58,8 +58,10 @@ from monai.transforms import (
     RandCropByPosNegLabeld,
     ToTensord,
 )
+import einops
 from pytorch_lightning.cli import ReduceLROnPlateau
 from pytorch_lightning.profilers import SimpleProfiler
+from pytorch_lightning.tuner import Tuner
 from sklearn.metrics import precision_score, accuracy_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split
 from torch.utils.tensorboard._utils import make_grid
@@ -81,7 +83,7 @@ def init_data_lists():
     list: A list of mask paths.
     """
     base_data_path = Path(
-        "/home/iejohnson/programing/Supervised_learning/DATA/preprocessed_data"
+        "/home/iejohnson/programing/Supervised_learning/DATA/swinunetr_preprocessed_data"
     )
     mask_paths = []
     image_paths = []
@@ -128,17 +130,25 @@ class Net(pytorch_lightning.LightningModule):
     def __init__(self, is_testing=False):
         super().__init__()
         self.number_of_classes = 5  # INCLUDES BACKGROUND
-        self._model = UNet(
-            spatial_dims=3,
+        # self._model = UNet(
+        #     spatial_dims=3,
+        #     in_channels=1,
+        #     out_channels=self.number_of_classes,
+        #     channels=(16, 32, 64, 128, 256),  # Number of features in each layer
+        #     strides=(2, 2, 2, 2),
+        #     num_res_units=3,
+        #     # norm=Norm.BATCH,
+        #     # dropout=0.1,
+        #     # act="relu",
+        # )
+        self._model = SwinUNETR(
+            img_size=(288, 288, 32),
             in_channels=1,
             out_channels=self.number_of_classes,
-            channels=(16, 32, 64, 128, 256),  # Number of features in each layer
-            strides=(2, 2, 2, 2),
-            num_res_units=3,
-            # norm=Norm.BATCH,
-            # dropout=0.1,
-            # act="relu",
+            # feature_size=32, # play with this later
+            use_v2=False,  # Play with this later
         )
+        self.batch_size = 1
         self.is_testing = is_testing
 
         self.loss_function = DiceCELoss(
@@ -212,7 +222,7 @@ class Net(pytorch_lightning.LightningModule):
         # define the data transforms
         self.train_transforms = Compose(
             [
-                LoadImaged(keys=["image", "label"]),
+                LoadImaged(keys=["image", "label"], reader="ITKReader"),
                 EnsureChannelFirstD(
                     keys=["image", "label"]
                 ),  # Add channel to image and mask so
@@ -239,14 +249,18 @@ class Net(pytorch_lightning.LightningModule):
         self.train_ds = CacheDataset(
             data=train_files,
             transform=self.train_transforms,
-            cache_rate=0.8,
+            cache_rate=0.1,
+            cache_num=2,
             num_workers=4,
+            runtime_cache=True,
         )
         self.val_ds = CacheDataset(
             data=val_files,
             transform=self.validation_transforms,
-            cache_rate=0.8,
+            cache_rate=0.1,
+            cache_num=2,
             num_workers=4,
+            runtime_cache=True,
         )
 
     def train_dataloader(self):
@@ -258,7 +272,7 @@ class Net(pytorch_lightning.LightningModule):
         """
         train_loader = DataLoader(
             self.train_ds,
-            batch_size=30,
+            batch_size=self.batch_size,
             shuffle=True,
             num_workers=12,
             collate_fn=list_data_collate,
@@ -272,7 +286,7 @@ class Net(pytorch_lightning.LightningModule):
         Returns:
         DataLoader: The validation data loader.
         """
-        val_loader = DataLoader(self.val_ds, batch_size=10, num_workers=8)
+        val_loader = DataLoader(self.val_ds, batch_size=self.batch_size, num_workers=8)
         return val_loader
 
     def configure_optimizers(self):
@@ -323,7 +337,7 @@ class Net(pytorch_lightning.LightningModule):
             on_epoch=True,
             reduce_fx=torch.mean,
             sync_dist=True,
-            batch_size=images.shape[0],
+            batch_size=self.batch_size,
         )
         self.log(
             "train_loss",
@@ -332,7 +346,7 @@ class Net(pytorch_lightning.LightningModule):
             on_epoch=True,
             reduce_fx=torch.mean,
             sync_dist=True,
-            batch_size=images.shape[0],
+            batch_size=self.batch_size,
         )
         return loss
 
@@ -372,7 +386,7 @@ class Net(pytorch_lightning.LightningModule):
             dice,
             on_step=False,
             on_epoch=True,
-            batch_size=images.shape[0],
+            batch_size=self.batch_size,
             sync_dist=True,
         )
         self.log(
@@ -380,7 +394,7 @@ class Net(pytorch_lightning.LightningModule):
             loss,
             on_step=False,
             on_epoch=True,
-            batch_size=images.shape[0],
+            batch_size=self.batch_size,
             sync_dist=True,
         )
         self.log(
@@ -388,7 +402,7 @@ class Net(pytorch_lightning.LightningModule):
             precision,
             on_step=False,
             on_epoch=True,
-            batch_size=images.shape[0],
+            batch_size=self.batch_size,
             sync_dist=True,
         )
         self.log(
@@ -396,7 +410,7 @@ class Net(pytorch_lightning.LightningModule):
             recall,
             on_step=False,
             on_epoch=True,
-            batch_size=images.shape[0],
+            batch_size=self.batch_size,
             sync_dist=True,
         )
         return loss
@@ -550,7 +564,7 @@ if __name__ == "__main__":
     current_file_loc = Path(__file__).parent
     log_dir = current_file_loc / "logs"
     tb_logger = pytorch_lightning.loggers.TensorBoardLogger(
-        save_dir=log_dir.as_posix(), name="3_27_24_lightning_logs"
+        save_dir=log_dir.as_posix(), name="3_27_24_lightning_logs_swinUnetr"
     )
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -576,13 +590,18 @@ if __name__ == "__main__":
         devices=[0],
         enable_checkpointing=True,
         num_sanity_val_steps=1,
+        log_every_n_steps=10,
         # profiler=profiler,
         callbacks=[
             BestModelCheckpoint(),
             checkpoint_callback,
         ],  # Add the custom callback
     )
-
+    # Use this to find the max size you can use
+    # tuner = Tuner(trainer)
+    #
+    # # Auto-scale batch size by growing it exponentially (default)
+    # tuner.scale_batch_size(net, mode="power")
     trainer.fit(net)
     net = Net.load_from_checkpoint(checkpoint_callback.best_model_path)
     net.run_example_inference()

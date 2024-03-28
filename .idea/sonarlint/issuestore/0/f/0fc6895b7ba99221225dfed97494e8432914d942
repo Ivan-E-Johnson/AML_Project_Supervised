@@ -1,0 +1,21 @@
+
+‡python:S5797â"HReplace this expression; used as a condition it will always be constant.(œ£¡ÜJ$df8bbbc4-f3ae-4b5f-8080-a7083391619f
+tpython:S1481"1Replace the unused local variable "fig" with "_".(ÑçÅÿüÿÿÿÿJ$ad298f30-4ce8-4f0e-bbed-2d8d774598ad
+ipython:S5806Y"+Rename this variable; it shadows a builtin.(±Í½J$1d3fcd7f-eba5-4dfc-bb64-eee9d1658bf7
+ipython:S5806Y"+Rename this variable; it shadows a builtin.(±Í½J$96af7e80-3a54-4820-b994-d468b5dc0a6e
+vpython:S1172f"3Remove the unused function parameter "output_path".(ï¨ŒùÿÿÿÿJ$21b9ce53-9a5f-4cfc-97c5-4468f3085d0f
+¡python:S117Ÿ"^Rename this local variable "UC_Image_Type" to match the regular expression ^[_a-z][a-z0-9_]*$.(ïÊ×ˆùÿÿÿÿJ$a1e6debd-4594-4978-9c78-ec38455ccb99
+œpython:S117 "YRename this local variable "UC_image" to match the regular expression ^[_a-z][a-z0-9_]*$.(şæ¯ÅıÿÿÿÿJ$551af789-c9ed-4c58-a9dc-9f5f2a2cd481
+¡python:S117®"^Rename this local variable "UC_Image_Type" to match the regular expression ^[_a-z][a-z0-9_]*$.(ïÊ×ˆùÿÿÿÿJ$6a175c69-cf35-460e-a57b-c2a175af46f7
+]python:S125æ"Remove this commented out code.(ëà©ÚJ$f7b87854-6036-4baf-923a-0874c3f8e1dd
+]python:S125"Remove this commented out code.(Áİ·×J$29ec5b22-6102-4e70-90e4-49bad8f96091
+ppython:S1481­",Remove the unused local variable "uc_image".(„–½¾ûÿÿÿÿJ$77bb4aa9-e212-4570-a433-a6857d3570db
+]python:S125š"Remove this commented out code.(š»şJ$ddcf0b16-60f8-403e-93ba-8d500e904847
+spython:S1135¡"4Complete the task associated to this "TODO" comment.(ï¹¸ÎJ$9b651604-aeab-4687-a867-ef911085ffa7
+]python:S125Ã"Remove this commented out code.(§ÅÑ„J$b60c1217-f0ea-4636-9cb0-7f8a6403f0c9
+bpython:S125Î"Remove this commented out code.(ï•ÕüÿÿÿÿJ$1998754c-ff5d-4009-8809-a7ee1f865e69
+xpython:S1135í"4Complete the task associated to this "TODO" comment.(êá¢úÿÿÿÿJ$07ff4233-72b6-4422-9be0-64bc746e3cac
+”python:S117ö"VRename this parameter "PIXEL_TYPE" to match the regular expression ^[_a-z][a-z0-9_]*$.( Ã÷˜J$30f83224-65ce-4a01-840f-f1ed9ef7049a
+spython:S1135­"4Complete the task associated to this "TODO" comment.(™»¬œJ$1d608322-c57f-46e3-8e3c-eeb32163fcf4
+]python:S125"Remove this commented out code.(İÖÉÙJ$6f3c5c41-c933-4752-acd5-9d9bfbafe13d
+]python:S125•"Remove this commented out code.(—¡ÏˆJ$fb6cdc20-39ed-42e8-93d2-21e473e95b4d
