@@ -374,10 +374,16 @@ class Net(pytorch_lightning.LightningModule):
             print(f"Dice: {dice}")
         targets = labels  # Assuming labels are already one-hot encoded
         precision = precision_score(
-            targets.flatten().cpu(), predictions.flatten().cpu(), average="weighted"
+            targets.flatten().cpu(),
+            predictions.flatten().cpu(),
+            average="weighted",
+            zero_division=0,
         )
         recall = recall_score(
-            targets.flatten().cpu(), predictions.flatten().cpu(), average="weighted"
+            targets.flatten().cpu(),
+            predictions.flatten().cpu(),
+            average="weighted",
+            zero_division=0,
         )
 
         # Log metrics
